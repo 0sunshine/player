@@ -177,6 +177,9 @@ typedef struct PacketQueue {
     int alloc_count;
 
     int is_buffer_indicator;
+
+    double last_pkt_pts;
+    double show_frame_pts;
 } PacketQueue;
 
 // #define VIDEO_PICTURE_QUEUE_SIZE 3
@@ -418,6 +421,7 @@ typedef struct VideoState {
     SDL_cond  *audio_accurate_seek_cond;
     volatile int initialized_decoder;
     int seek_buffering;
+
 } VideoState;
 
 /* options specified by the user */
@@ -755,7 +759,7 @@ inline static void ffp_reset_internal(FFPlayer *ffp)
     ffp->decoder_reorder_pts    = -1;
     ffp->autoexit               = 0;
     ffp->loop                   = 1;
-    ffp->framedrop              = 0; // option
+    ffp->framedrop              = 1; // option
     ffp->seek_at_start          = 0;
     ffp->infinite_buffer        = -1;
     ffp->show_mode              = SHOW_MODE_NONE;
@@ -794,7 +798,7 @@ inline static void ffp_reset_internal(FFPlayer *ffp)
     ffp->auto_resume            = 0;
     ffp->error                  = 0;
     ffp->error_count            = 0;
-    ffp->start_on_prepared      = 1;
+    ffp->start_on_prepared      = 0;
     ffp->first_video_frame_rendered = 0;
     ffp->sync_av_start          = 1;
     ffp->enable_accurate_seek   = 0;
@@ -802,7 +806,7 @@ inline static void ffp_reset_internal(FFPlayer *ffp)
 
     ffp->playable_duration_ms           = 0;
 
-    ffp->packet_buffering               = 1;
+    ffp->packet_buffering               = 0; //1;
     ffp->pictq_size                     = VIDEO_PICTURE_QUEUE_SIZE_DEFAULT; // option
     ffp->max_fps                        = 31; // option
 
@@ -812,23 +816,23 @@ inline static void ffp_reset_internal(FFPlayer *ffp)
     ffp->vtb_handle_resolution_change   = 0; // option
     ffp->vtb_wait_async                 = 0; // option
 
-    ffp->mediacodec_all_videos          = 0; // option
-    ffp->mediacodec_avc                 = 0; // option
-    ffp->mediacodec_hevc                = 0; // option
-    ffp->mediacodec_mpeg2               = 0; // option
-    ffp->mediacodec_handle_resolution_change = 0; // option
-    ffp->mediacodec_auto_rotate         = 0; // option
+    ffp->mediacodec_all_videos          = 1; // option
+    ffp->mediacodec_avc                 = 1; // option
+    ffp->mediacodec_hevc                = 1; // option
+    ffp->mediacodec_mpeg2               = 1; // option
+    ffp->mediacodec_handle_resolution_change = 1; // option
+    ffp->mediacodec_auto_rotate         = 1; // option
 
     ffp->opensles                       = 0; // option
-    ffp->soundtouch_enable              = 0; // option
+    ffp->soundtouch_enable              = 1; // option
 
     ffp->iformat_name                   = NULL; // option
 
     ffp->no_time_adjust                 = 0; // option
-    ffp->async_init_decoder             = 0; // option
+    ffp->async_init_decoder             = 1; // option
     ffp->video_mime_type                = NULL; // option
     ffp->mediacodec_default_name        = NULL; // option
-    ffp->ijkmeta_delay_init             = 0; // option
+    ffp->ijkmeta_delay_init             = 1; // option
     ffp->render_wait_start              = 0;
 
     ijkmeta_reset(ffp->meta);

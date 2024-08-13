@@ -246,12 +246,23 @@ static int recreate_format_l(JNIEnv *env, IJKFF_Pipenode *node)
             free(convert_buffer);
         } else {
             // Codec specific data
-            // SDL_AMediaFormat_setBuffer(opaque->aformat, "csd-0", opaque->codecpar->extradata, opaque->codecpar->extradata_size);
+            ALOGE("csd-0: %d\n",opaque->codecpar->extradata_size);
+            SDL_AMediaFormat_setBuffer(opaque->input_aformat, "csd-0", opaque->codecpar->extradata, opaque->codecpar->extradata_size);
             ALOGE("csd-0: naked\n");
         }
     } else {
         ALOGE("no buffer(%d)\n", opaque->codecpar->extradata_size);
     }
+
+    ALOGE("low latency\n");
+    SDL_AMediaFormat_setInt32(opaque->input_aformat, "low-latency", 1);
+    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vdec-lowlatency", 1);
+    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.qti-ext-dec-picture-order.enable", 1);
+    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.qti-ext-dec-low-latency.enable", 1);
+    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.hisi-ext-low-latency-video-dec.video-scene-for-low-latency-req", 1);
+    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.hisi-ext-low-latency-video-dec.video-scene-for-low-latency-rdy", 1);
+    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.rtc-ext-dec-low-latency.enable", 1);
+    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.low-latency.enable", 1);
 
     rotate_degrees = ffp_get_video_rotate_degrees(ffp);
     if (ffp->mediacodec_auto_rotate &&
@@ -631,6 +642,7 @@ static int feed_input_buffer2(JNIEnv *env, IJKFF_Pipenode *node, int64_t timeUs,
 
         queue_flags = 0;
         input_buffer_index = SDL_AMediaCodec_dequeueInputBuffer(opaque->acodec, timeUs);
+
         if (input_buffer_index < 0) {
             if (SDL_AMediaCodec_isInputBuffersValid(opaque->acodec)) {
                 // timeout
@@ -950,6 +962,7 @@ static int feed_input_buffer(JNIEnv *env, IJKFF_Pipenode *node, int64_t timeUs, 
 
         queue_flags = 0;
         input_buffer_index = SDL_AMediaCodec_dequeueInputBuffer(opaque->acodec, timeUs);
+        ALOGE("%s: input_buffer_index: %d\n", __func__, input_buffer_index);
         if (input_buffer_index < 0) {
             if (SDL_AMediaCodec_isInputBuffersValid(opaque->acodec)) {
                 // timeout
@@ -963,6 +976,7 @@ static int feed_input_buffer(JNIEnv *env, IJKFF_Pipenode *node, int64_t timeUs, 
         } else {
             SDL_AMediaCodecFake_flushFakeFrames(opaque->acodec);
 
+            //ALOGW("%s: ffp-> writeInputData, pts: %lld\n", __func__, d->pkt_temp.pts);
             copy_size = SDL_AMediaCodec_writeInputData(opaque->acodec, input_buffer_index, d->pkt_temp.data, d->pkt_temp.size);
             if (!copy_size) {
                 ALOGE("%s: SDL_AMediaCodec_getInputBuffer failed\n", __func__);
@@ -972,6 +986,9 @@ static int feed_input_buffer(JNIEnv *env, IJKFF_Pipenode *node, int64_t timeUs, 
         }
 
         time_stamp = d->pkt_temp.pts;
+        ALOGE("queueInputBuffer, input_buffer_index: %d, pts: %lld\n", input_buffer_index, time_stamp);
+
+
         if (time_stamp == AV_NOPTS_VALUE && d->pkt_temp.dts != AV_NOPTS_VALUE)
             time_stamp = d->pkt_temp.dts;
         if (time_stamp >= 0) {
@@ -979,7 +996,6 @@ static int feed_input_buffer(JNIEnv *env, IJKFF_Pipenode *node, int64_t timeUs, 
         } else {
             time_stamp = 0;
         }
-        // ALOGE("queueInputBuffer, %lld\n", time_stamp);
         amc_ret = SDL_AMediaCodec_queueInputBuffer(opaque->acodec, input_buffer_index, 0, copy_size, time_stamp, queue_flags);
         if (amc_ret != SDL_AMEDIA_OK) {
             ALOGE("%s: SDL_AMediaCodec_getInputBuffer failed\n", __func__);
@@ -1239,6 +1255,9 @@ static int drain_output_buffer_l(JNIEnv *env, IJKFF_Pipenode *node, int64_t time
         } else {
             ret = amc_fill_frame(node, frame, got_frame, output_buffer_index, SDL_AMediaCodec_getSerial(opaque->acodec), &bufferInfo);
         }
+
+
+         ALOGW("queueInputBuffer <----, output_buffer_index: %d ,pts: %lld\n", output_buffer_index, frame->pts);
     }
 
 done:
@@ -1575,6 +1594,7 @@ static int func_run_sync(IJKFF_Pipenode *node)
     AVRational             frame_rate = av_guess_frame_rate(is->ic, is->video_st, NULL);
     double                 duration;
     double                 pts;
+    int64_t                last_get_pts = -1;
 
     if (!opaque->acodec) {
         return ffp_video_thread(ffp);
@@ -1595,6 +1615,10 @@ static int func_run_sync(IJKFF_Pipenode *node)
         ret = -1;
         goto fail;
     }
+
+    ALOGW("%s: ffp->func_run_sync\n", __func__);
+
+    //int64_t last_decodec_pts = 0;
 
     while (!q->abort_request) {
         int64_t timeUs = opaque->acodec_first_dequeue_output_request ? 0 : AMC_OUTPUT_TIMEOUT_US;
@@ -1640,12 +1664,26 @@ static int func_run_sync(IJKFF_Pipenode *node)
                     }
                 }
             }
-            ret = ffp_queue_picture(ffp, frame, pts, duration, av_frame_get_pkt_pos(frame), is->viddec.pkt_serial);
-            if (ret) {
-                if (frame->opaque)
-                    SDL_VoutAndroid_releaseBufferProxyP(opaque->weak_vout, (SDL_AMediaCodecBufferProxy **)&frame->opaque, false);
+
+            // if(frame->pts <= last_get_pts)
+            // {
+            //     ALOGW("%s: drop pts: %lld\n", __func__, last_get_pts);
+            //     if (frame->opaque) {
+            //         SDL_VoutAndroid_releaseBufferProxyP(opaque->weak_vout, (SDL_AMediaCodecBufferProxy **)&frame->opaque, false);
+            //     }
+            //     av_frame_unref(frame); 
+            // }
+            // else
+            {
+                //ALOGW("%s: get pts: %lld\n", __func__, frame->pts);
+                last_get_pts = frame->pts;
+                ret = ffp_queue_picture(ffp, frame, pts, duration, av_frame_get_pkt_pos(frame), is->viddec.pkt_serial);
+                if (ret) {
+                    if (frame->opaque)
+                        SDL_VoutAndroid_releaseBufferProxyP(opaque->weak_vout, (SDL_AMediaCodecBufferProxy **)&frame->opaque, false);
+                }
+                av_frame_unref(frame);
             }
-            av_frame_unref(frame);
         }
     }
 
@@ -1808,6 +1846,8 @@ int ffpipenode_config_from_android_mediacodec(FFPlayer *ffp, IJKFF_Pipeline *pip
         goto fail;
     }
 
+    ALOGW("mediacodec configure\n");
+
     jsurface = ffpipeline_get_surface_as_global_ref(env, pipeline);
     ret = configure_codec_l(env, node, jsurface);
     J4A_DeleteGlobalRef__p(env, &jsurface);
@@ -1885,6 +1925,8 @@ IJKFF_Pipenode *ffpipenode_init_decoder_from_android_mediacodec(FFPlayer *ffp, I
         ALOGE("%s:create: SetupThreadEnv failed\n", __func__);
         goto fail;
     }
+
+    av_log(NULL, AV_LOG_WARNING, "mediacocdec init : \n");
 
     ALOGI("%s:use default mediacodec name: %s\n", __func__, ffp->mediacodec_default_name);
     strcpy(opaque->mcc.codec_name, ffp->mediacodec_default_name);

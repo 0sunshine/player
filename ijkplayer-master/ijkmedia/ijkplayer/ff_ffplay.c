@@ -227,6 +227,7 @@ static int packet_queue_init(PacketQueue *q)
         return AVERROR(ENOMEM);
     }
     q->abort_request = 1;
+
     return 0;
 }
 
@@ -876,6 +877,8 @@ static void video_image_display2(FFPlayer *ffp)
     Frame *sp = NULL;
 
     vp = frame_queue_peek_last(&is->pictq);
+
+    is->videoq.show_frame_pts = vp->pts;
 
     if (vp->bmp) {
         if (is->subtitle_st) {
@@ -1712,9 +1715,12 @@ static int get_video_frame(FFPlayer *ffp, AVFrame *frame)
                     is->videoq.nb_packets) {
                     is->frame_drops_early++;
                     is->continuous_frame_drops_early++;
-                    if (is->continuous_frame_drops_early > ffp->framedrop) {
+                    if (is->continuous_frame_drops_early > ffp->framedrop)
+                    {
                         is->continuous_frame_drops_early = 0;
-                    } else {
+                    }
+                    else
+                    {
                         ffp->stat.drop_frame_count++;
                         ffp->stat.drop_frame_rate = (float)(ffp->stat.drop_frame_count) / (float)(ffp->stat.decode_frame_count);
                         av_frame_unref(frame);
@@ -3051,6 +3057,7 @@ static int is_realtime(AVFormatContext *s)
 
     if(s->pb && (   !strncmp(s->filename, "rtp:", 4)
                  || !strncmp(s->filename, "udp:", 4)
+                 || !strncmp(s->filename, "avitrtc:", 8)
                 )
     )
         return 1;
@@ -3077,6 +3084,7 @@ static int read_thread(void *arg)
     int64_t prev_io_tick_counter = 0;
     int64_t io_tick_counter = 0;
     int init_ijkmeta = 0;
+    int is_get_i_key = 0;
 
     if (!wait_mutex) {
         av_log(NULL, AV_LOG_FATAL, "SDL_CreateMutex(): %s\n", SDL_GetError());
@@ -3098,10 +3106,10 @@ static int read_thread(void *arg)
     }
     ic->interrupt_callback.callback = decode_interrupt_cb;
     ic->interrupt_callback.opaque = is;
-    if (!av_dict_get(ffp->format_opts, "scan_all_pmts", NULL, AV_DICT_MATCH_CASE)) {
-        av_dict_set(&ffp->format_opts, "scan_all_pmts", "1", AV_DICT_DONT_OVERWRITE);
-        scan_all_pmts_set = 1;
-    }
+    // if (!av_dict_get(ffp->format_opts, "scan_all_pmts", NULL, AV_DICT_MATCH_CASE)) {
+    //     av_dict_set(&ffp->format_opts, "scan_all_pmts", "1", AV_DICT_DONT_OVERWRITE);
+    //     scan_all_pmts_set = 1;
+    // }
     if (av_stristart(is->filename, "rtmp", NULL) ||
         av_stristart(is->filename, "rtsp", NULL)) {
         // There is total different meaning for 'timeout' option in rtmp
@@ -3149,6 +3157,11 @@ static int read_thread(void *arg)
     //opts = setup_find_stream_info_opts(ic, ffp->codec_opts);
     //orig_nb_streams = ic->nb_streams;
 
+    ic->max_analyze_duration = AV_TIME_BASE * 3;
+    //ic->probesize = 1024 * 1024 * 1;
+    av_log(NULL, AV_LOG_WARNING,
+           "--ffp->find_stream_info: %d , ic->probesize: %lld, ic->max_analyze_duration: %lld, packet_buffering: %d, ffp->av_sync_type: %d\n", 
+           ffp->find_stream_info, ic->probesize, ic->max_analyze_duration, ffp->packet_buffering, ffp->av_sync_type);
 
     if (ffp->find_stream_info) {
         AVDictionary **opts = setup_find_stream_info_opts(ic, ffp->codec_opts);
@@ -3515,7 +3528,11 @@ static int read_thread(void *arg)
             }
         }
         pkt->flags = 0;
+
+        int64_t start = av_gettime_relative();
         ret = av_read_frame(ic, pkt);
+        int64_t end = av_gettime_relative();
+
         if (ret < 0) {
             int pb_eof = 0;
             int pb_error = 0;
@@ -3564,11 +3581,33 @@ static int read_thread(void *arg)
             SDL_CondWaitTimeout(is->continue_read_thread, wait_mutex, 10);
             SDL_UnlockMutex(wait_mutex);
             ffp_statistic_l(ffp);
+
+            av_log(ffp, AV_LOG_WARNING, "av_read_frame speed: %lldms,  NO PKT\n", (end-start)/1000);
+
             continue;
         } else {
+            av_log(ffp, AV_LOG_WARNING, "av_read_frame speed: %lldms\n", (end-start)/1000);
             is->eof = 0;
         }
 
+        static int64_t logFrep = 0;
+
+        if( (++logFrep) % 240 == 0 )
+        {
+            is->videoq.last_pkt_pts = pkt->pts * av_q2d(ic->streams[is->video_stream]->time_base);
+
+            int frame_remaining = frame_queue_nb_remaining(&is->pictq);
+            av_log(ffp, AV_LOG_WARNING, 
+                "videoq.nb_packets: %d, frame_remaining: %d, pts: %lld, drops_early: %d, drops_late: %d, pts_diff: %lf\n", 
+                is->videoq.nb_packets, 
+                frame_remaining, 
+                pkt->pts,
+                is->frame_drops_early,
+                is->frame_drops_late,
+                is->videoq.last_pkt_pts - is->videoq.show_frame_pts
+            );
+        }
+        
         if (pkt->flags & AV_PKT_FLAG_DISCONTINUITY) {
             if (is->audio_stream >= 0) {
                 packet_queue_put(&is->audioq, &flush_pkt);
@@ -3589,11 +3628,82 @@ static int read_thread(void *arg)
                 av_q2d(ic->streams[pkt->stream_index]->time_base) -
                 (double)(ffp->start_time != AV_NOPTS_VALUE ? ffp->start_time : 0) / 1000000
                 <= ((double)ffp->duration / 1000000);
-        if (pkt->stream_index == is->audio_stream && pkt_in_play_range) {
+        if (pkt->stream_index == is->audio_stream && pkt_in_play_range)
+        {
+            // if(!is_get_i_key)
+            // {
+            //     av_packet_unref(pkt);
+            // }
+            // else
+            // {
+            //     packet_queue_put(&is->audioq, pkt);
+            // }
+
             packet_queue_put(&is->audioq, pkt);
         } else if (pkt->stream_index == is->video_stream && pkt_in_play_range
                    && !(is->video_st && (is->video_st->disposition & AV_DISPOSITION_ATTACHED_PIC))) {
+        {
+            int64_t cache_duration = pkt->duration * av_q2d(ic->streams[is->video_stream]->time_base) * 1000 * is->videoq.nb_packets;
+
+            if(cache_duration > 350)
+            {      
+                av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration %lld , nb_packets: %d, pkt->duration: %lld\n", cache_duration, is->videoq.nb_packets, pkt->duration);
+                if (fabs(ffp->pf_playback_rate-1.0) < 0.1)
+                {
+                    ffp_set_playback_rate(ffp, 1.2);
+                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate 1.2\n");
+                }
+            }
+
+            if(is->videoq.nb_packets < 2)
+            {
+                if (fabs(ffp->pf_playback_rate-1.0) > 0.1)
+                {
+                    ffp_set_playback_rate(ffp, 1.0);
+                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate 1.0\n");
+                }
+            }
+
+
+            // if( !is_get_i_key && !(pkt->flags & AV_PKT_FLAG_KEY))
+            // {
+            //     av_packet_unref(pkt);
+            // }
+            // else
+            // {
+            //     if(!is_get_i_key)
+            //     {
+            //         for (int tmp = 0; tmp < 10; ++tmp)
+            //         {
+            //             AVPacket *pkt_tmp = av_packet_clone(pkt);
+            //             packet_queue_put(&is->videoq, pkt_tmp);
+            //         }
+            //     }
+
+            //     is_get_i_key = 1;
+            //     packet_queue_put(&is->videoq, pkt);
+            // }
+
+
+            // if(pkt->flags & AV_PKT_FLAG_KEY)
+            // {
+            //     for (int tmp = 0; tmp < 5; ++tmp)
+            //     {
+            //         AVPacket *pkt_tmp = av_packet_clone(pkt);
+            //         packet_queue_put(&is->videoq, pkt_tmp);
+            //     }
+            // }
+            // else
+            // {
+            //     AVPacket *copy1 = av_packet_clone(pkt);
+            //     AVPacket *copy2 = av_packet_clone(pkt);
+
+            //     packet_queue_put(&is->videoq, copy1);
+            //     packet_queue_put(&is->videoq, copy2);
+            // }
+
             packet_queue_put(&is->videoq, pkt);
+        }
         } else if (pkt->stream_index == is->subtitle_stream && pkt_in_play_range) {
             packet_queue_put(&is->subtitleq, pkt);
         } else {
@@ -3644,6 +3754,8 @@ static VideoState *stream_open(FFPlayer *ffp, const char *filename, AVInputForma
     assert(!ffp->is);
     VideoState *is;
 
+    ffp->packet_buffering = 0;
+
     is = av_mallocz(sizeof(VideoState));
     if (!is)
         return NULL;
@@ -3657,7 +3769,12 @@ static VideoState *stream_open(FFPlayer *ffp, const char *filename, AVInputForma
     if (ffp->soundtouch_enable) {
         is->handle = ijk_soundtouch_create();
     }
+    av_log(NULL, AV_LOG_WARNING, "ffp->soundtouch_enable: %d\n", ffp->soundtouch_enable);
 #endif
+
+    av_log(NULL, AV_LOG_WARNING, "ffp->mediacodec_sync: %d\n", ffp->mediacodec_sync);
+    av_log(NULL, AV_LOG_WARNING, "ffp->ijkmeta_delay_init: %d\n", ffp->ijkmeta_delay_init);
+    
 
     /* start video display */
     if (frame_queue_init(&is->pictq, &is->videoq, ffp->pictq_size, 1) < 0)
@@ -3871,6 +3988,9 @@ void ffp_global_init()
         return;
 
     ALOGD("ijkmediaplayer version : %s", ijkmp_version());
+
+    ffp_global_set_log_level(IJK_LOG_DEBUG);
+
     /* register all codecs, demux and protocols */
     avcodec_register_all();
 #if CONFIG_AVDEVICE
@@ -4278,6 +4398,8 @@ int ffp_prepare_async_l(FFPlayer *ffp, const char *file_name)
             file_name = "ijklongurl:";
         }
     }
+
+    //ffp_set_option();
 
     av_log(NULL, AV_LOG_INFO, "===== versions =====\n");
     ffp_show_version_str(ffp, "ijkplayer",      ijk_version_info());
