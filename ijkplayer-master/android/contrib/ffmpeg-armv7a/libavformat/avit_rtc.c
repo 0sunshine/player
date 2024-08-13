@@ -46,10 +46,10 @@ static int avit_rtc_read(URLContext *h, uint8_t *buf, int size)
 {
     int ret = 0;
     
+    int already_wait_time = 0;
+        
     do
     {
-        int already_wait_time = 0;
-        
         ret = avit_rtc_sdk_read(buf, size);
         if(ret != 0)
         {
