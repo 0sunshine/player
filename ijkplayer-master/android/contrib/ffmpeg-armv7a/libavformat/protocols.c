@@ -74,6 +74,7 @@ extern const URLProtocol ff_librtmpte_protocol;
 extern const URLProtocol ff_libsrt_protocol;
 extern const URLProtocol ff_libssh_protocol;
 extern const URLProtocol ff_libsmbclient_protocol;
+extern const URLProtocol ff_avit_rtc_protocol;
 
 #include "libavformat/protocol_list.c"
 

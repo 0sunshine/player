@@ -2978,18 +2978,19 @@ static int decode_nal_unit(HEVCContext *s, const H2645NAL *nal)
             if (ret < 0)
                 goto fail;
         } else {
-            if (s->threads_number > 1 && s->sh.num_entry_point_offsets > 0)
-                ctb_addr_ts = hls_slice_data_wpp(s, nal);
-            else
-                ctb_addr_ts = hls_slice_data(s);
-            if (ctb_addr_ts >= (s->ps.sps->ctb_width * s->ps.sps->ctb_height)) {
-                s->is_decoded = 1;
-            }
+            //为了支持硬解探测流时长降低，这里就不再支持软解了
+            // if (s->threads_number > 1 && s->sh.num_entry_point_offsets > 0)
+            //     ctb_addr_ts = hls_slice_data_wpp(s, nal);
+            // else
+            //     ctb_addr_ts = hls_slice_data(s);
+            // if (ctb_addr_ts >= (s->ps.sps->ctb_width * s->ps.sps->ctb_height)) {
+            //     s->is_decoded = 1;
+            // }
 
-            if (ctb_addr_ts < 0) {
-                ret = ctb_addr_ts;
-                goto fail;
-            }
+            // if (ctb_addr_ts < 0) {
+            //     ret = ctb_addr_ts;
+            //     goto fail;
+            // }
         }
         break;
     case HEVC_NAL_EOS_NUT:
