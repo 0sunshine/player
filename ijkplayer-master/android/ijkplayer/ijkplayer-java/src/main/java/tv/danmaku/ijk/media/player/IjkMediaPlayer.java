@@ -520,6 +520,7 @@ public final class IjkMediaPlayer extends AbstractMediaPlayer {
     @Override
     public void start() throws IllegalStateException {
         stayAwake(true);
+        //setSpeed(1.50F);
         _start();
     }
 

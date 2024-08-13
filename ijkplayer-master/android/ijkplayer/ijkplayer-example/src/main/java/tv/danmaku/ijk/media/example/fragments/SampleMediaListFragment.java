@@ -19,6 +19,7 @@ package tv.danmaku.ijk.media.example.fragments;
 
 import android.app.Activity;
 import android.content.Context;
+import android.media.MediaCodecInfo;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
@@ -32,6 +33,16 @@ import android.widget.TextView;
 
 import tv.danmaku.ijk.media.example.R;
 import tv.danmaku.ijk.media.example.activities.VideoActivity;
+
+
+import android.media.MediaCodec;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
+import android.util.Log;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import android.media.MediaCodec.BufferInfo;
+import android.media.MediaCodecList;
 
 public class SampleMediaListFragment extends Fragment {
     private ListView mFileListView;
@@ -57,6 +68,7 @@ public class SampleMediaListFragment extends Fragment {
         final Activity activity = getActivity();
 
         mAdapter = new SampleMediaAdapter(activity);
+
         mFileListView.setAdapter(mAdapter);
         mFileListView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -68,71 +80,42 @@ public class SampleMediaListFragment extends Fragment {
             }
         });
 
-        String manifest_string =
-                "{\n" +
-                "    \"version\": \"1.0.0\",\n" +
-                "    \"adaptationSet\": [\n" +
-                "        {\n" +
-                "            \"duration\": 1000,\n" +
-                "            \"id\": 1,\n" +
-                "            \"representation\": [\n" +
-                "                {\n" +
-                "                    \"id\": 1,\n" +
-                "                    \"codec\": \"avc1.64001e,mp4a.40.5\",\n" +
-                "                    \"url\": \"http://las-tech.org.cn/kwai/las-test_ld500d.flv\",\n" +
-                "                    \"backupUrl\": [],\n" +
-                "                    \"host\": \"las-tech.org.cn\",\n" +
-                "                    \"maxBitrate\": 700,\n" +
-                "                    \"width\": 640,\n" +
-                "                    \"height\": 360,\n" +
-                "                    \"frameRate\": 25,\n" +
-                "                    \"qualityType\": \"SMOOTH\",\n" +
-                "                    \"qualityTypeName\": \"流畅\",\n" +
-                "                    \"hidden\": false,\n" +
-                "                    \"disabledFromAdaptive\": false,\n" +
-                "                    \"defaultSelected\": false\n" +
-                "                },\n" +
-                "                {\n" +
-                "                    \"id\": 2,\n" +
-                "                    \"codec\": \"avc1.64001f,mp4a.40.5\",\n" +
-                "                    \"url\": \"http://las-tech.org.cn/kwai/las-test_sd1000d.flv\",\n" +
-                "                    \"backupUrl\": [],\n" +
-                "                    \"host\": \"las-tech.org.cn\",\n" +
-                "                    \"maxBitrate\": 1300,\n" +
-                "                    \"width\": 960,\n" +
-                "                    \"height\": 540,\n" +
-                "                    \"frameRate\": 25,\n" +
-                "                    \"qualityType\": \"STANDARD\",\n" +
-                "                    \"qualityTypeName\": \"标清\",\n" +
-                "                    \"hidden\": false,\n" +
-                "                    \"disabledFromAdaptive\": false,\n" +
-                "                    \"defaultSelected\": true\n" +
-                "                },\n" +
-                "                {\n" +
-                "                    \"id\": 3,\n" +
-                "                    \"codec\": \"avc1.64001f,mp4a.40.5\",\n" +
-                "                    \"url\": \"http://las-tech.org.cn/kwai/las-test.flv\",\n" +
-                "                    \"backupUrl\": [],\n" +
-                "                    \"host\": \"las-tech.org.cn\",\n" +
-                "                    \"maxBitrate\": 2300,\n" +
-                "                    \"width\": 1280,\n" +
-                "                    \"height\": 720,\n" +
-                "                    \"frameRate\": 30,\n" +
-                "                    \"qualityType\": \"HIGH\",\n" +
-                "                    \"qualityTypeName\": \"高清\",\n" +
-                "                    \"hidden\": false,\n" +
-                "                    \"disabledFromAdaptive\": false,\n" +
-                "                    \"defaultSelected\": false\n" +
-                "                }\n" +
-                "            ]\n" +
-                "        }\n" +
-                "    ]\n" +
-                "}";
 
-        mAdapter.addItem(manifest_string, "las test");
-        mAdapter.addItem("http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8", "bipbop basic master playlist");
-        mAdapter.addItem("http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear1/prog_index.m3u8", "bipbop basic 400x300 @ 232 kbps");
-        mAdapter.addItem("http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear2/prog_index.m3u8", "bipbop basic 640x480 @ 650 kbps");
+//        MediaCodecList codecList = new MediaCodecList(MediaCodecList.ALL_CODECS);
+//        MediaCodecInfo[] codecInfos = codecList.getCodecInfos();
+//
+//        int max_item = codecInfos.length > 10 ? 10:codecInfos.length;
+//
+//        for(int i =0; i < max_item; ++i){
+//            MediaCodecInfo codecInfo = codecInfos[i];
+//            String info = codecInfo.getName() + "-";
+//
+//            mAdapter.addItem( info, "MediaCodecList");
+//        }
+
+
+//        try {
+//            MediaCodec codec = MediaCodec.createByCodecName("");
+//            codec.setInputSurface();
+//            mAdapter.addItem(codec.getName(), "codec");
+//
+//        } catch (IOException e) {
+//            mAdapter.addItem(e.getMessage(), "codec err");
+//        }
+
+        mAdapter.addItem("xxx", "0801-154600");
+        mAdapter.addItem("http://192.168.6.200:9044/live/avit/4M/4000000/4000000_llhls.m3u8", "hls");
+        mAdapter.addItem("http://192.168.6.200:29090/vod/OP001/14232/testmss_8000000.m3u8", "vod");
+        mAdapter.addItem("http://192.168.8.152:9044/live/avit/4M/4000000/4000000_llhls.m3u8", "hls");
+        mAdapter.addItem("http://192.168.8.152:29090/vod/OP001/14232/testmss_8000000.m3u8", "vod");
+        mAdapter.addItem("udp://238.110.0.2:30000", "udp 8M");
+        mAdapter.addItem("udp://238.123.45.6:30000", "udp 8M");
+        mAdapter.addItem("udp://238.123.45.6:30000?buffer_size=1024000", "udp 8M");
+        mAdapter.addItem("udp://238.123.45.6:30000?buffer_size=2048000", "udp 8M");
+        mAdapter.addItem("udp://238.123.45.6:30000?buffer_size=4096000", "udp 8M");
+        mAdapter.addItem("avitrtc://238.110.0.1:30000?serverip=192.168.8.152&serverport=14042", "4K");
+        mAdapter.addItem("avitrtc://238.110.0.2:30000?serverip=192.168.8.152&serverport=14043", "8M");
+        mAdapter.addItem("avitrtc://238.110.0.3:30000?serverip=192.168.8.152&serverport=14044", "4M");
         mAdapter.addItem("http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear3/prog_index.m3u8", "bipbop basic 640x480 @ 1 Mbps");
         mAdapter.addItem("http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear4/prog_index.m3u8", "bipbop basic 960x720 @ 2 Mbps");
         mAdapter.addItem("http://devimages.apple.com.edgekey.net/streaming/examples/bipbop_4x3/gear0/prog_index.m3u8", "bipbop basic 22.050Hz stereo @ 40 kbps");

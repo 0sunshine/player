@@ -326,6 +326,7 @@ echo "[*] link ffmpeg"
 echo "--------------------"
 echo $FF_EXTRA_LDFLAGS
 
+FF_EXTRA_LDFLAGS="$FF_EXTRA_LDFLAGS -L/mnt/e/wsl_shared/code/ijkplayer-master/android/contrib/ffmpeg-armv7a -lavit_rtc"
 FF_C_OBJ_FILES=
 FF_ASM_OBJ_FILES=
 for MODULE_DIR in $FF_MODULE_DIRS
