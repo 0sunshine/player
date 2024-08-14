@@ -878,7 +878,18 @@ static void video_image_display2(FFPlayer *ffp)
 
     vp = frame_queue_peek_last(&is->pictq);
 
-    is->videoq.show_frame_pts = vp->pts;
+    if(is->videoq.mark_pkt_pts != -1 && is->videoq.mark_show_frame_pts_time == -1 && vp->frame->pts >= is->videoq.mark_pkt_pts)
+    {
+        if(vp->frame->pts > is->videoq.mark_pkt_pts)
+        {
+            is->videoq.mark_pkt_pts = -1;
+        }
+        else
+        {
+            is->videoq.mark_show_frame_pts_time = av_gettime_relative();
+        }
+        //av_log(NULL, AV_LOG_INFO, "video_image_display2, mark_pkt_pts: %lld, vp->frame->pts: %lld\n", is->videoq.mark_pkt_pts, vp->frame->pts);
+    }
 
     if (vp->bmp) {
         if (is->subtitle_st) {
@@ -1674,9 +1685,9 @@ static int queue_picture(FFPlayer *ffp, AVFrame *src_frame, double pts, double d
         vp->bmp->sar_num = vp->sar.num;
         vp->bmp->sar_den = vp->sar.den;
 
-#ifdef FFP_MERGE
+//#ifdef FFP_MERGE
         av_frame_move_ref(vp->frame, src_frame);
-#endif
+//#endif
         frame_queue_push(&is->pictq);
         if (!is->viddec.first_frame_decoded) {
             ALOGD("Video: first frame decoded\n");
@@ -1721,6 +1732,12 @@ static int get_video_frame(FFPlayer *ffp, AVFrame *frame)
                     }
                     else
                     {
+                        if(frame->pts == is->videoq.mark_pkt_pts)
+                        {
+                            is->videoq.mark_show_frame_pts_time = -1;
+                            is->videoq.mark_pkt_pts = -1;
+                        }
+
                         ffp->stat.drop_frame_count++;
                         ffp->stat.drop_frame_rate = (float)(ffp->stat.drop_frame_count) / (float)(ffp->stat.decode_frame_count);
                         av_frame_unref(frame);
@@ -3532,6 +3549,7 @@ static int read_thread(void *arg)
         int64_t start = av_gettime_relative();
         ret = av_read_frame(ic, pkt);
         int64_t end = av_gettime_relative();
+        int64_t speed_time = (end - start) / 1000;
 
         if (ret < 0) {
             int pb_eof = 0;
@@ -3586,26 +3604,40 @@ static int read_thread(void *arg)
 
             continue;
         } else {
-            av_log(ffp, AV_LOG_WARNING, "av_read_frame speed: %lldms\n", (end-start)/1000);
             is->eof = 0;
         }
 
-        static int64_t logFrep = 0;
-
-        if( (++logFrep) % 240 == 0 )
+        if(speed_time < 100)
         {
-            is->videoq.last_pkt_pts = pkt->pts * av_q2d(ic->streams[is->video_stream]->time_base);
+            // is->videoq.mark_pkt_pts = -1;
+            // is->videoq.mark_pkt_pts_time = -1;
+            // is->videoq.mark_show_frame_pts = -1;
+            // is->videoq.mark_show_frame_pts_time = -1;
 
-            int frame_remaining = frame_queue_nb_remaining(&is->pictq);
-            av_log(ffp, AV_LOG_WARNING, 
-                "videoq.nb_packets: %d, frame_remaining: %d, pts: %lld, drops_early: %d, drops_late: %d, pts_diff: %lf\n", 
-                is->videoq.nb_packets, 
-                frame_remaining, 
-                pkt->pts,
-                is->frame_drops_early,
-                is->frame_drops_late,
-                is->videoq.last_pkt_pts - is->videoq.show_frame_pts
-            );
+
+            if(is->videoq.mark_show_frame_pts_time != -1) //显示了
+            {
+                av_log(ffp, AV_LOG_INFO, 
+                    "drops_early: %d, drops_late: %d, pts_diff: [%lld] ms, mark_pkt_pts: %lld, nb_packets: %d\n", 
+                    is->frame_drops_early,
+                    is->frame_drops_late,
+                    (is->videoq.mark_show_frame_pts_time - is->videoq.mark_pkt_pts_time) / 1000,
+                    is->videoq.mark_pkt_pts,
+                    is->videoq.nb_packets
+                );
+
+                is->videoq.mark_show_frame_pts_time = -1;
+                is->videoq.mark_pkt_pts = -1;
+            }
+
+            if(is->videoq.mark_pkt_pts == -1) //追踪一帧的显示
+            {
+                is->videoq.mark_show_frame_pts_time = -1;
+                is->videoq.mark_pkt_pts = pkt->pts; // * av_q2d(ic->streams[is->video_stream]->time_base);
+                is->videoq.mark_pkt_pts_time = av_gettime_relative();
+            }
+
+            //is->videoq.last_pkt_pts = pkt->pts * av_q2d(ic->streams[is->video_stream]->time_base);
         }
         
         if (pkt->flags & AV_PKT_FLAG_DISCONTINUITY) {
@@ -3643,26 +3675,73 @@ static int read_thread(void *arg)
         } else if (pkt->stream_index == is->video_stream && pkt_in_play_range
                    && !(is->video_st && (is->video_st->disposition & AV_DISPOSITION_ATTACHED_PIC))) {
         {
-            int64_t cache_duration = pkt->duration * av_q2d(ic->streams[is->video_stream]->time_base) * 1000 * is->videoq.nb_packets;
-
-            if(cache_duration > 350)
-            {      
-                av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration %lld , nb_packets: %d, pkt->duration: %lld\n", cache_duration, is->videoq.nb_packets, pkt->duration);
-                if (fabs(ffp->pf_playback_rate-1.0) < 0.1)
-                {
-                    ffp_set_playback_rate(ffp, 1.2);
-                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate 1.2\n");
-                }
-            }
-
-            if(is->videoq.nb_packets < 2)
+            if(speed_time > 100)
             {
-                if (fabs(ffp->pf_playback_rate-1.0) > 0.1)
+                if(pkt->flags & AV_PKT_FLAG_KEY)
                 {
-                    ffp_set_playback_rate(ffp, 1.0);
-                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate 1.0\n");
+                    av_log(ffp, AV_LOG_WARNING, "av_read_frame read I Frame bytes:[%d], time:[%lld]ms\n", pkt->size, speed_time);
+                }
+                else
+                {
+                    av_log(ffp, AV_LOG_WARNING, "av_read_frame read not I Frame bytes:[%d], time:[%lld]ms\n", pkt->size, speed_time);
                 }
             }
+
+            int64_t cache_duration = is->videoq.duration * av_q2d(ic->streams[is->video_stream]->time_base) * 1000;
+
+            float rate = 1.0;
+
+            if (cache_duration > 400)
+            {
+                rate = 1.2;
+
+                av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration [%lld] , nb_packets: [%d]\n", cache_duration, is->videoq.nb_packets);
+
+                if (fabs(ffp->pf_playback_rate - rate) > 0.001)
+                {
+                    ffp_set_playback_rate(ffp, rate);
+                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
+                }
+            }
+            else if(cache_duration > 150)
+            {   
+                rate = 1.05;
+
+                av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration [%lld] , nb_packets: [%d]\n", cache_duration, is->videoq.nb_packets);
+
+                if (fabs(ffp->pf_playback_rate-rate) > 0.001)
+                {
+                    ffp_set_playback_rate(ffp, rate);
+                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
+                }
+            }
+            else
+            {
+                rate = 1.00;
+                if (fabs(ffp->pf_playback_rate-rate) > 0.001)
+                {
+                    ffp_set_playback_rate(ffp, rate);
+                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
+                }
+            }
+            // else if(cache_duration > 60)
+            // {
+            //     rate = 0.9;
+            //     if (fabs(ffp->pf_playback_rate-rate) > 0.001)
+            //     {
+            //         ffp_set_playback_rate(ffp, rate);
+            //         av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
+            //     }
+            // }      
+            // else if(cache_duration > 35)
+            // {
+            //     rate = 0.8;
+            //     if (fabs(ffp->pf_playback_rate-rate) > 0.001)
+            //     {
+            //         ffp_set_playback_rate(ffp, rate);
+            //         av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
+            //     }
+            // }     
 
 
             // if( !is_get_i_key && !(pkt->flags & AV_PKT_FLAG_KEY))
@@ -3783,6 +3862,10 @@ static VideoState *stream_open(FFPlayer *ffp, const char *filename, AVInputForma
         goto fail;
     if (frame_queue_init(&is->sampq, &is->audioq, SAMPLE_QUEUE_SIZE, 1) < 0)
         goto fail;
+
+    is->videoq.mark_pkt_pts = -1;
+    is->videoq.mark_pkt_pts_time = -1;
+    is->videoq.mark_show_frame_pts_time = -1;
 
     if (packet_queue_init(&is->videoq) < 0 ||
         packet_queue_init(&is->audioq) < 0 ||

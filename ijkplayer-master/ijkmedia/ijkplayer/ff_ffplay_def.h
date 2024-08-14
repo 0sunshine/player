@@ -178,8 +178,10 @@ typedef struct PacketQueue {
 
     int is_buffer_indicator;
 
-    double last_pkt_pts;
-    double show_frame_pts;
+    int64_t mark_pkt_pts;
+    int64_t mark_pkt_pts_time;
+    int64_t mark_show_frame_pts_time;
+
 } PacketQueue;
 
 // #define VIDEO_PICTURE_QUEUE_SIZE 3

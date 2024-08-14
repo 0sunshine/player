@@ -1512,6 +1512,13 @@ static int drain_output_buffer2(JNIEnv *env, IJKFF_Pipenode *node, int64_t timeU
                         if (frame->opaque) {
                             SDL_VoutAndroid_releaseBufferProxyP(opaque->weak_vout, (SDL_AMediaCodecBufferProxy **)&frame->opaque, false);
                         }
+
+                        if(frame->pts == is->videoq.mark_pkt_pts)
+                        {
+                            is->videoq.mark_show_frame_pts_time = -1;
+                            is->videoq.mark_pkt_pts = -1;
+                        }
+
                         av_frame_unref(frame);
                         return ret;
                     }
