@@ -88,7 +88,7 @@ Frame    *ffp_frame_queue_peek_writable(FrameQueue *f);
 void      ffp_frame_queue_push(FrameQueue *f);
 
 int       ffp_queue_picture(FFPlayer *ffp, AVFrame *src_frame, double pts, double duration, int64_t pos, int serial);
-
+//int64_t   ffp_get_last_picture_pts(FFPlayer *ffp);
 int       ffp_get_master_sync_type(VideoState *is);
 double    ffp_get_master_clock(VideoState *is);
 

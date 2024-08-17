@@ -51,8 +51,10 @@ static int avit_rtc_read(URLContext *h, uint8_t *buf, int size)
     do
     {
         ret = avit_rtc_sdk_read(buf, size);
+
         if(ret != 0)
         {
+            //av_log(h, AV_LOG_DEBUG, "avit_rtc_sdk_read bytes: [%d]\n", ret);
             break;
         }
 

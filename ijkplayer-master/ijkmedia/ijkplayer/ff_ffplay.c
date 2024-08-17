@@ -724,6 +724,26 @@ static Frame *frame_queue_peek_last(FrameQueue *f)
     return &f->queue[f->rindex];
 }
 
+static int64_t frame_queue_peek_last_pts(FrameQueue *f)
+{
+    int64_t pts = -1;
+
+    SDL_LockMutex(f->mutex);
+
+    if(f->size > 0)
+    {
+        AVFrame* frame = f->queue[f->rindex].frame;
+        if(frame != NULL)
+        {
+            pts = frame->pts;
+        }
+    }
+
+    SDL_UnlockMutex(f->mutex);
+
+    return pts;
+}
+
 static Frame *frame_queue_peek_writable(FrameQueue *f)
 {
     /* wait until we have space to put a new frame */
@@ -746,6 +766,8 @@ static Frame *frame_queue_peek_readable(FrameQueue *f)
     SDL_LockMutex(f->mutex);
     while (f->size - f->rindex_shown <= 0 &&
            !f->pktq->abort_request) {
+
+        av_log(NULL, AV_LOG_WARNING, "wait audio data.....\n");
         SDL_CondWait(f->cond, f->mutex);
     }
     SDL_UnlockMutex(f->mutex);
@@ -1363,6 +1385,10 @@ retry:
             /* compute nominal last_duration */
             last_duration = vp_duration(is, lastvp, vp);
             delay = compute_target_delay(ffp, last_duration, is);
+
+            // {
+            //     delay = 0;
+            // }
 
             time= av_gettime_relative()/1000000.0;
             if (isnan(is->frame_timer) || time < is->frame_timer)
@@ -2534,6 +2560,7 @@ reload:
         dec_channel_layout       != is->audio_src.channel_layout ||
         af->frame->sample_rate   != is->audio_src.freq           ||
         (wanted_nb_samples       != af->frame->nb_samples && !is->swr_ctx)) {
+        av_log(NULL, AV_LOG_ERROR, "why in ..............");
         AVDictionary *swr_opts = NULL;
         swr_free(&is->swr_ctx);
         is->swr_ctx = swr_alloc_set_opts(NULL,
@@ -2568,6 +2595,7 @@ reload:
     }
 
     if (is->swr_ctx) {
+        av_log(NULL, AV_LOG_ERROR, "why in ..............");
         const uint8_t **in = (const uint8_t **)af->frame->extended_data;
         uint8_t **out = &is->audio_buf1;
         int out_count = (int)((int64_t)wanted_nb_samples * is->audio_tgt.freq / af->frame->sample_rate + 256);
@@ -2632,6 +2660,13 @@ reload:
     else
         is->audio_clock = NAN;
     is->audio_clock_serial = af->serial;
+
+    static double last_clock;
+    ALOGD("audio: delay=%0.3f clock=%0.3f clock0=%0.3f\n",
+    is->audio_clock - last_clock,
+    is->audio_clock, audio_clock0);
+    last_clock = is->audio_clock;
+
 #ifdef FFP_SHOW_AUDIO_DELAY
     {
         static double last_clock;
@@ -2678,6 +2713,8 @@ static void sdl_audio_callback(void *opaque, Uint8 *stream, int len)
         SDL_AoutSetPlaybackVolume(ffp->aout, ffp->pf_playback_volume);
     }
 
+    ALOGW("sdl_audio_callback begin\n");
+
     while (len > 0) {
         if (is->audio_buf_index >= is->audio_buf_size) {
            audio_size = audio_decode_frame(ffp);
@@ -2717,7 +2754,9 @@ static void sdl_audio_callback(void *opaque, Uint8 *stream, int len)
     is->audio_write_buf_size = is->audio_buf_size - is->audio_buf_index;
     /* Let's assume the audio driver that is used by SDL has two periods. */
     if (!isnan(is->audio_clock)) {
-        set_clock_at(&is->audclk, is->audio_clock - (double)(is->audio_write_buf_size) / is->audio_tgt.bytes_per_sec - SDL_AoutGetLatencySeconds(ffp->aout), is->audio_clock_serial, ffp->audio_callback_time / 1000000.0);
+        double pts = is->audio_clock - (double)(is->audio_write_buf_size) / is->audio_tgt.bytes_per_sec; // - SDL_AoutGetLatencySeconds(ffp->aout);
+        ALOGW("SDL_AoutGetLatencySeconds: %lf, %lf\n", SDL_AoutGetLatencySeconds(ffp->aout), pts);
+        set_clock_at(&is->audclk, pts, is->audio_clock_serial, ffp->audio_callback_time / 1000000.0);
         sync_clock_to_slave(&is->extclk, &is->audclk);
     }
     if (!ffp->first_audio_frame_rendered) {
@@ -2741,6 +2780,8 @@ static void sdl_audio_callback(void *opaque, Uint8 *stream, int len)
             SDL_Delay(20);
         }
     }
+
+    ALOGW("sdl_audio_callback end, bytes: %d, audio_write_buf_size: %d\n", len, is->audio_write_buf_size);
 }
 
 static int audio_open(FFPlayer *opaque, int64_t wanted_channel_layout, int wanted_nb_channels, int wanted_sample_rate, struct AudioParams *audio_hw_params)
@@ -3376,6 +3417,10 @@ static int read_thread(void *arg)
         ffp_seek_to_l(ffp, (long)(ffp->seek_at_start));
     }
 
+
+    int64_t last_audio_pts = -1;
+    int64_t last_video_pts = -1;
+
     for (;;) {
         if (is->abort_request)
             break;
@@ -3662,125 +3707,107 @@ static int read_thread(void *arg)
                 <= ((double)ffp->duration / 1000000);
         if (pkt->stream_index == is->audio_stream && pkt_in_play_range)
         {
-            // if(!is_get_i_key)
-            // {
-            //     av_packet_unref(pkt);
-            // }
-            // else
-            // {
-            //     packet_queue_put(&is->audioq, pkt);
-            // }
+            int64_t last_samp_pts = frame_queue_peek_last_pts(&is->sampq);
+
+            AVRational tb = (AVRational){1, ic->streams[is->audio_stream]->codec->sample_rate};
+            last_samp_pts = av_rescale_q(last_samp_pts, tb, ic->streams[is->audio_stream]->time_base);
+
+            if(last_samp_pts != -1)
+            {
+                if(AV_NOPTS_VALUE != pkt->pts)
+                {
+                    int64_t cache_duration_by_pts = pkt->pts - last_samp_pts;
+
+
+                    int64_t cache_duration = cache_duration_by_pts * av_q2d(ic->streams[is->audio_stream]->time_base) * 1000;
+                    av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration audio1 by pts [%lld]ms ", cache_duration);
+                }
+            }
+
+
+            last_audio_pts = pkt->pts * av_q2d(ic->streams[is->audio_stream]->time_base) * 1000;
 
             packet_queue_put(&is->audioq, pkt);
         } else if (pkt->stream_index == is->video_stream && pkt_in_play_range
                    && !(is->video_st && (is->video_st->disposition & AV_DISPOSITION_ATTACHED_PIC))) {
         {
+            double aval = get_clock(&is->audclk);
+            double vval = get_clock(&is->vidclk);
+            av_log(ffp, AV_LOG_WARNING, "get_clock a:%lf, v:%lf, diff:%lf", aval, vval, vval - aval);
+
+            last_video_pts = pkt->pts * av_q2d(ic->streams[is->video_stream]->time_base) * 1000;
+
             if(speed_time > 100)
             {
                 if(pkt->flags & AV_PKT_FLAG_KEY)
                 {
-                    av_log(ffp, AV_LOG_WARNING, "av_read_frame read I Frame bytes:[%d], time:[%lld]ms\n", pkt->size, speed_time);
+                    av_log(ffp, AV_LOG_WARNING, "av_read_frame read I Frame bytes:[%d], time:[%lld]ms", pkt->size, speed_time);
                 }
                 else
                 {
-                    av_log(ffp, AV_LOG_WARNING, "av_read_frame read not I Frame bytes:[%d], time:[%lld]ms\n", pkt->size, speed_time);
+                    av_log(ffp, AV_LOG_WARNING, "av_read_frame read not I Frame bytes:[%d], time:[%lld]ms", pkt->size, speed_time);
                 }
             }
 
-            int64_t cache_duration = is->videoq.duration * av_q2d(ic->streams[is->video_stream]->time_base) * 1000;
+            // if(is->mediacodec_last_output_pts != -1)
+            // {
+            //     if(AV_NOPTS_VALUE != pkt->pts)
+            //     {
+            //         int64_t cache_duration_by_pts = cache_duration_by_pts = pkt->pts - is->mediacodec_last_output_pts;
+            //         cache_duration = cache_duration_by_pts * av_q2d(ic->streams[is->video_stream]->time_base) * 1000;
+            //         av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration by pts [%lld]ms ", cache_duration);
+            //     }
+            //     else
+            //     {
+            //         av_log(ffp, AV_LOG_WARNING, "ffp-> pkt->pts = AV_NOPTS_VALUE");
+            //     }
+            // }
 
-            float rate = 1.0;
-
-            if (cache_duration > 400)
+            int64_t last_picture_pts = frame_queue_peek_last_pts(&is->pictq);
+            if(last_picture_pts != -1)
             {
-                rate = 1.2;
-
-                av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration [%lld] , nb_packets: [%d]\n", cache_duration, is->videoq.nb_packets);
-
-                if (fabs(ffp->pf_playback_rate - rate) > 0.001)
+                if(AV_NOPTS_VALUE != pkt->pts)
                 {
-                    ffp_set_playback_rate(ffp, rate);
-                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
+                    int64_t cache_duration_by_pts = pkt->pts - last_picture_pts;
+                    int64_t cache_duration = cache_duration_by_pts * av_q2d(ic->streams[is->video_stream]->time_base) * 1000;
+                    av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration video by pts [%lld]ms ", cache_duration);
+
+                    float rate = 1.0;
+                    if (cache_duration > 400)
+                    {
+                        rate = 1.2;
+                        av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration [%lld] , nb_packets: [%d]", cache_duration, is->videoq.nb_packets);
+                        if (fabs(ffp->pf_playback_rate - rate) > 0.001)
+                        {
+                            ffp_set_playback_rate(ffp, rate);
+                            av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
+                        }
+                    }
+                    else if(cache_duration > 250)
+                    {   
+                        rate = 1.05;
+                        av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration [%lld] , nb_packets: [%d]", cache_duration, is->videoq.nb_packets);
+                        if (fabs(ffp->pf_playback_rate-rate) > 0.001)
+                        {
+                            ffp_set_playback_rate(ffp, rate);
+                            av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
+                        }
+                    }
+                    else
+                    {
+                        rate = 1.00;
+                        if (fabs(ffp->pf_playback_rate-rate) > 0.001)
+                        {
+                            ffp_set_playback_rate(ffp, rate);
+                            av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
+                        }
+                    }
+                }
+                else
+                {
+                    av_log(ffp, AV_LOG_WARNING, "ffp-> pkt->pts = AV_NOPTS_VALUE");
                 }
             }
-            else if(cache_duration > 150)
-            {   
-                rate = 1.05;
-
-                av_log(ffp, AV_LOG_WARNING, "ffp-> cache_duration [%lld] , nb_packets: [%d]\n", cache_duration, is->videoq.nb_packets);
-
-                if (fabs(ffp->pf_playback_rate-rate) > 0.001)
-                {
-                    ffp_set_playback_rate(ffp, rate);
-                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
-                }
-            }
-            else
-            {
-                rate = 1.00;
-                if (fabs(ffp->pf_playback_rate-rate) > 0.001)
-                {
-                    ffp_set_playback_rate(ffp, rate);
-                    av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
-                }
-            }
-            // else if(cache_duration > 60)
-            // {
-            //     rate = 0.9;
-            //     if (fabs(ffp->pf_playback_rate-rate) > 0.001)
-            //     {
-            //         ffp_set_playback_rate(ffp, rate);
-            //         av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
-            //     }
-            // }      
-            // else if(cache_duration > 35)
-            // {
-            //     rate = 0.8;
-            //     if (fabs(ffp->pf_playback_rate-rate) > 0.001)
-            //     {
-            //         ffp_set_playback_rate(ffp, rate);
-            //         av_log(ffp, AV_LOG_WARNING, "ffp-> pf_playback_rate %f\n", rate);
-            //     }
-            // }     
-
-
-            // if( !is_get_i_key && !(pkt->flags & AV_PKT_FLAG_KEY))
-            // {
-            //     av_packet_unref(pkt);
-            // }
-            // else
-            // {
-            //     if(!is_get_i_key)
-            //     {
-            //         for (int tmp = 0; tmp < 10; ++tmp)
-            //         {
-            //             AVPacket *pkt_tmp = av_packet_clone(pkt);
-            //             packet_queue_put(&is->videoq, pkt_tmp);
-            //         }
-            //     }
-
-            //     is_get_i_key = 1;
-            //     packet_queue_put(&is->videoq, pkt);
-            // }
-
-
-            // if(pkt->flags & AV_PKT_FLAG_KEY)
-            // {
-            //     for (int tmp = 0; tmp < 5; ++tmp)
-            //     {
-            //         AVPacket *pkt_tmp = av_packet_clone(pkt);
-            //         packet_queue_put(&is->videoq, pkt_tmp);
-            //     }
-            // }
-            // else
-            // {
-            //     AVPacket *copy1 = av_packet_clone(pkt);
-            //     AVPacket *copy2 = av_packet_clone(pkt);
-
-            //     packet_queue_put(&is->videoq, copy1);
-            //     packet_queue_put(&is->videoq, copy2);
-            // }
-
             packet_queue_put(&is->videoq, pkt);
         }
         } else if (pkt->stream_index == is->subtitle_stream && pkt_in_play_range) {
@@ -3789,6 +3816,11 @@ static int read_thread(void *arg)
             av_packet_unref(pkt);
         }
 
+        int64_t curr_avpts_diff = last_video_pts - last_audio_pts;
+        if (curr_avpts_diff > 100)
+        {
+            av_log(ffp, AV_LOG_WARNING, "ffp-> curr_avpts_diff: [%lld]ms", curr_avpts_diff);
+        }
         ffp_statistic_l(ffp);
 
         if (ffp->ijkmeta_delay_init && !init_ijkmeta &&
@@ -3856,6 +3888,7 @@ static VideoState *stream_open(FFPlayer *ffp, const char *filename, AVInputForma
     
 
     /* start video display */
+    av_log(NULL, AV_LOG_WARNING, "ffp->pictq_size: %d\n", ffp->pictq_size);
     if (frame_queue_init(&is->pictq, &is->videoq, ffp->pictq_size, 1) < 0)
         goto fail;
     if (frame_queue_init(&is->subpq, &is->subtitleq, SUBPICTURE_QUEUE_SIZE, 0) < 0)
@@ -3903,6 +3936,9 @@ static VideoState *stream_open(FFPlayer *ffp, const char *filename, AVInputForma
 
     is->play_mutex = SDL_CreateMutex();
     is->accurate_seek_mutex = SDL_CreateMutex();
+
+    //is->mediacodec_last_output_pts = -1;
+
     ffp->is = is;
     is->pause_req = !ffp->start_on_prepared;
 
@@ -4769,6 +4805,11 @@ int ffp_queue_picture(FFPlayer *ffp, AVFrame *src_frame, double pts, double dura
 {
     return queue_picture(ffp, src_frame, pts, duration, pos, serial);
 }
+
+// int64_t ffp_get_last_picture_pts(FFPlayer *ffp)
+// {
+//     return frame_queue_peek_last_pts(&ffp->is->pictq);
+// }
 
 int ffp_get_master_sync_type(VideoState *is)
 {

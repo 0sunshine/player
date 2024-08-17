@@ -181,7 +181,10 @@ static int recreate_format_l(JNIEnv *env, IJKFF_Pipenode *node)
     if (opaque->codecpar->extradata && opaque->codecpar->extradata_size > 0) {
         if ((opaque->codecpar->codec_id == AV_CODEC_ID_H264 && opaque->codecpar->extradata[0] == 1)
             || (opaque->codecpar->codec_id == AV_CODEC_ID_HEVC && opaque->codecpar->extradata_size > 3
-                && (opaque->codecpar->extradata[0] == 1 || opaque->codecpar->extradata[1] == 1))) {
+                && (opaque->codecpar->extradata[0] == 1 || opaque->codecpar->extradata[1] == 1))) 
+                {
+
+            ALOGI("recreate_format_l...............................\n");
 #if AMC_USE_AVBITSTREAM_FILTER
             if (opaque->codecpar->codec_id == AV_CODEC_ID_H264) {
                 opaque->bsfc = av_bitstream_filter_init("h264_mp4toannexb");
@@ -246,8 +249,8 @@ static int recreate_format_l(JNIEnv *env, IJKFF_Pipenode *node)
             free(convert_buffer);
         } else {
             // Codec specific data
-            ALOGE("csd-0: %d\n",opaque->codecpar->extradata_size);
-            SDL_AMediaFormat_setBuffer(opaque->input_aformat, "csd-0", opaque->codecpar->extradata, opaque->codecpar->extradata_size);
+            // ALOGE("csd-0: %d\n",opaque->codecpar->extradata_size);
+            // SDL_AMediaFormat_setBuffer(opaque->input_aformat, "csd-0", opaque->codecpar->extradata, opaque->codecpar->extradata_size);
             ALOGE("csd-0: naked\n");
         }
     } else {
@@ -256,13 +259,13 @@ static int recreate_format_l(JNIEnv *env, IJKFF_Pipenode *node)
 
     ALOGE("low latency\n");
     SDL_AMediaFormat_setInt32(opaque->input_aformat, "low-latency", 1);
-    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vdec-lowlatency", 1);
-    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.qti-ext-dec-picture-order.enable", 1);
-    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.qti-ext-dec-low-latency.enable", 1);
-    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.hisi-ext-low-latency-video-dec.video-scene-for-low-latency-req", 1);
-    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.hisi-ext-low-latency-video-dec.video-scene-for-low-latency-rdy", 1);
-    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.rtc-ext-dec-low-latency.enable", 1);
-    SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.low-latency.enable", 1);
+    // SDL_AMediaFormat_setInt32(opaque->input_aformat, "vdec-lowlatency", 1);
+    // SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.qti-ext-dec-picture-order.enable", 1);
+    // SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.qti-ext-dec-low-latency.enable", 1);
+    // SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.hisi-ext-low-latency-video-dec.video-scene-for-low-latency-req", 1);
+    // SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.hisi-ext-low-latency-video-dec.video-scene-for-low-latency-rdy", 1);
+    // SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.rtc-ext-dec-low-latency.enable", 1);
+    // SDL_AMediaFormat_setInt32(opaque->input_aformat, "vendor.low-latency.enable", 1);
 
     rotate_degrees = ffp_get_video_rotate_degrees(ffp);
     if (ffp->mediacodec_auto_rotate &&
@@ -397,6 +400,7 @@ static int configure_codec_l(JNIEnv *env, IJKFF_Pipenode *node, jobject new_surf
         opaque->frame_width  = opaque->codecpar->width;
         opaque->frame_height = opaque->codecpar->height;
     }
+
     amc_ret = SDL_AMediaCodec_configure_surface(env, opaque->acodec, opaque->input_aformat, opaque->jsurface, NULL, 0);
     if (amc_ret != SDL_AMEDIA_OK) {
         ALOGE("%s:configure_surface: failed\n", __func__);
@@ -962,7 +966,7 @@ static int feed_input_buffer(JNIEnv *env, IJKFF_Pipenode *node, int64_t timeUs, 
 
         queue_flags = 0;
         input_buffer_index = SDL_AMediaCodec_dequeueInputBuffer(opaque->acodec, timeUs);
-        ALOGE("%s: input_buffer_index: %d\n", __func__, input_buffer_index);
+        //ALOGE("%s: input_buffer_index: %d\n", __func__, input_buffer_index);
         if (input_buffer_index < 0) {
             if (SDL_AMediaCodec_isInputBuffersValid(opaque->acodec)) {
                 // timeout
@@ -1493,6 +1497,9 @@ static int drain_output_buffer2(JNIEnv *env, IJKFF_Pipenode *node, int64_t timeU
     if (got_frame) {
         duration = (frame_rate.num && frame_rate.den ? av_q2d((AVRational){frame_rate.den, frame_rate.num}) : 0);
         pts = (frame->pts == AV_NOPTS_VALUE) ? NAN : frame->pts * av_q2d(tb);
+
+        //is->mediacodec_last_output_pts = frame->pts;
+
         if (ffp->framedrop > 0 || (ffp->framedrop && ffp_get_master_sync_type(is) != AV_SYNC_VIDEO_MASTER)) {
             ffp->stat.decode_frame_count++;
             if (frame->pts != AV_NOPTS_VALUE) {
@@ -1530,6 +1537,7 @@ static int drain_output_buffer2(JNIEnv *env, IJKFF_Pipenode *node, int64_t timeU
             if (frame->opaque)
                 SDL_VoutAndroid_releaseBufferProxyP(opaque->weak_vout, (SDL_AMediaCodecBufferProxy **)&frame->opaque, false);
         }
+        
         av_frame_unref(frame);
     }
 
@@ -1646,6 +1654,17 @@ static int func_run_sync(IJKFF_Pipenode *node)
         if (got_frame) {
             duration = (frame_rate.num && frame_rate.den ? av_q2d((AVRational){frame_rate.den, frame_rate.num}) : 0);
             pts = (frame->pts == AV_NOPTS_VALUE) ? NAN : frame->pts * av_q2d(tb);
+
+            //is->mediacodec_last_output_pts = frame->pts;
+
+            // {
+            //     if (frame->opaque) {
+            //         SDL_VoutAndroid_releaseBufferProxyP(opaque->weak_vout, (SDL_AMediaCodecBufferProxy **)&frame->opaque, false);
+            //     }
+            //     av_frame_unref(frame);
+            //     continue;
+            // }
+
             if (ffp->framedrop > 0 || (ffp->framedrop && ffp_get_master_sync_type(is) != AV_SYNC_VIDEO_MASTER)) {
                 ffp->stat.decode_frame_count++;
                 if (frame->pts != AV_NOPTS_VALUE) {

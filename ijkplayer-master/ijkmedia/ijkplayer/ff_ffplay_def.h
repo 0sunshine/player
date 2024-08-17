@@ -191,7 +191,6 @@ typedef struct PacketQueue {
 #define SUBPICTURE_QUEUE_SIZE 16
 #define SAMPLE_QUEUE_SIZE 9
 #define FRAME_QUEUE_SIZE FFMAX(SAMPLE_QUEUE_SIZE, FFMAX(VIDEO_PICTURE_QUEUE_SIZE_MAX, SUBPICTURE_QUEUE_SIZE))
-
 #define VIDEO_MAX_FPS_DEFAULT 30
 
 typedef struct AudioParams {
@@ -423,6 +422,8 @@ typedef struct VideoState {
     SDL_cond  *audio_accurate_seek_cond;
     volatile int initialized_decoder;
     int seek_buffering;
+
+    //volatile int64_t mediacodec_last_output_pts; //mediacodec出来的最后一个pts
 
 } VideoState;
 
