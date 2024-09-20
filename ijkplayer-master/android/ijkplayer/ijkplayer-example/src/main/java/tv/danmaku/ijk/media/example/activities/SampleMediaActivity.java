@@ -60,6 +60,10 @@ public class SampleMediaActivity extends AppActivity  {
         if (item != null)
             item.setVisible(false);
 
+        item = menu.findItem(R.id.action_sample);
+        if (item != null)
+            item.setVisible(false);
+
         return true;
     }
 }

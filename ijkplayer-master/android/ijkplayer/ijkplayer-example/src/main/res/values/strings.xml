@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <string name="app_name">ijkmediademo</string>
+    <string name="app_name">avitdemo</string>
 
     <string name="N_A">N/A</string>
     <string name="close">Close</string>
     <string name="exit">Exit</string>
-    <string name="sample">Sample</string>
-    <string name="recent">Recent</string>
-    <string name="settings">Settings</string>
+    <string name="sample">频道</string>
+    <string name="recent">最近播放频道</string>
+    <string name="settings">设置</string>
     <string name="tracks">Tracks</string>
     <string name="toggle_player">Player</string>
     <string name="toggle_render">Render</string>
